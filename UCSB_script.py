@@ -19,6 +19,8 @@ def load_config():
         config["token"] = getpass("API Token: ")
     if config.get("group") is None:
         config["group"] = input("Group name: ")
+    if config.get("project") is None:
+        config["project"] = input("Project name: ")
     if config.get("collection") is None:
         config["collection"] = input("Collection name: ")
     if config.get("inventory") is None:
@@ -30,10 +32,6 @@ def load_config():
         config["path"] = input("Path to CSV file: ").strip('"')
 
     return config
-
-def _setattrs(obj, **kwargs):
-    for key, value in kwargs.items():
-        setattr(obj, key, value)
 
 def get_inventory(inventory_name, group, collection, api, public):
     """Either creates or retrieves an inventory object from CRIPT.
@@ -49,18 +47,13 @@ def get_inventory(inventory_name, group, collection, api, public):
 
     inventory = cript.Inventory(group=group, collection=collection, name=inventory_name, materials=[], public=public)
 
-    # Save inventory
-    try:
-        api.save(inventory, max_level=0)
-        print(f"Created Inventory: {inventory.name}")
-    except cript.exceptions.DuplicateNodeError:
-        # Fetch inventory from the DB if it already exists
-        inventory = api.get(cript.Inventory, {"name": inventory.name, "group": group.uid}, max_level=0)
-        print(f"Found existing inventory: {inventory.name}")
+    # Save inventory or fetch and update existing inventory
+    api.save(inventory,update_existing=True, max_level=0)
+    
 
     return inventory
 
-def get_polymer(index,row,api,group,public):
+def get_polymer(index,row,api,group,project,public):
     """Creates or receives a cript Material object.
     @args:
     index: int
@@ -107,6 +100,7 @@ def get_polymer(index,row,api,group,public):
     
 
     poly_dict={"group": group,
+    "project":project,
     "name": poly_name,
     "identifiers": idpol,
     "notes": notes,
@@ -114,20 +108,14 @@ def get_polymer(index,row,api,group,public):
 
     polymer = cript.Material(**poly_dict)
 
-    # Save material
-    try:
-        api.save(polymer, max_level=0)
-        print(f"ROW {index + 1} -- Created polymer: {polymer.name}")
-    except cript.exceptions.DuplicateNodeError:
-        # Fetch and update existing material
-        polymer = api.get(cript.Material, {"name": polymer.name, "created_by": api.user.uid}, max_level=0)
-        _setattrs(polymer, **poly_dict)
-        api.save(polymer, max_level=0)
-        print(f"ROW {index + 2} -- Updated existing polymer: {polymer.name}")
+    # Save material or fetch and update existing
+    
+    api.save(polymer,update_existing = True, max_level=0)
+    
 
     return polymer
 
-def parseFile(path,inventory,group,api,public):
+def parseFile(path,inventory,group,project,api,public):
     """Iterates through rows and calls upon get_polymer to make material objects.
     Adds materials to specified inventory.
     @args:
@@ -141,7 +129,7 @@ def parseFile(path,inventory,group,api,public):
     df=pd.read_csv(path)
     
     for index,row in df.iterrows():
-        polymer=get_polymer(index,row,api,group,public)
+        polymer=get_polymer(index,row,api,group,project,public)
         inventory.materials.append(polymer)
 
     api.save(inventory, max_level=0)
@@ -165,8 +153,8 @@ if __name__ == "__main__":
 
     # Fetch objects
     group = api.get(cript.Group, {"name": config["group"]}, max_level=0)
-    
-    collection = api.get(cript.Collection, {"name": config["collection"], "group": group.uid}, max_level=0)
+    project = api.get(cript.Project, {"name":config["project"]}, max_level=0)
+    collection = api.get(cript.Collection, {"name": config["collection"], "group": group.uid, "project": project.uid}, max_level=0)
 
     inventory=get_inventory(
         config["inventory"],
@@ -176,4 +164,5 @@ if __name__ == "__main__":
         config["public"]
         )
 
-    parseFile(config["path"],inventory,group,api,config["public"])
+    parseFile(config["path"],inventory,group,project,api,config["public"])
+    print("Upload completed")
